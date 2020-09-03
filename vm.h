@@ -9,8 +9,10 @@
 typedef struct {
     Chunk* chunk;
     uint8_t* ip;
-    Value stack[STACK_MAX];
-    Value* stackTop;
+
+    int count;
+    int capacity;
+    Value* stack;
 } VM;
 
 typedef enum {
