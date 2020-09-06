@@ -189,9 +189,10 @@ Token scanToken() {
     scanner.start = scanner.current;
 
     if (isAtEnd()) return makeToken(TOKEN_EOF);
-    if (isAlpha(c)) return identifier();
 
     char c = advance();
+
+    if (isAlpha(c)) return identifier();
     if (isDigit(c)) return number();
 
     switch (c) {
