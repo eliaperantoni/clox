@@ -22,6 +22,7 @@ struct sObj {
 
 struct sObjString {
     Obj obj;
+    bool owned;
     int length;
     char* chars;
 };
