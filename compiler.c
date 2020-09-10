@@ -463,11 +463,7 @@ static void printStatement() {
     emitByte(OP_PRINT);
 }
 
-static void synchronize() {static int byteInstruction(const char* name, Chunk* chunk, int offset) {
-  uint8_t slot = chunk->code[offset + 1];
-  printf("%-16s %4d\n", name, slot);
-  return offset + 2;
-}
+static void synchronize() {
     parser.panicMode = false;
 
     while (parser.current.type != TOKEN_EOF) {
