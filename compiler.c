@@ -597,6 +597,54 @@ static void whileStatement() {
     emitByte(OP_POP);
 }
 
+static void switchStatement() {
+    int switchStart = currentChunk()->count;
+
+    consume(TOKEN_LEFT_PAREN, "Expect '(' after 'switch'.");
+    expression();
+    consume(TOKEN_RIGHT_PAREN, "Expect ')' after switch expression.");
+
+    consume(TOKEN_LEFT_BRACE, "Expect '{' to start switch cases.");
+
+    int previousCaseGuard = -1;
+
+    while(match(TOKEN_CASE)) {
+        if (previousCaseGuard != -1) {
+            patchJump(previousCaseGuard);
+
+            // Pop truth value if jumped from previous case
+            emitByte(OP_POP);
+        }
+
+        // [base]
+        expression();
+        // [base, case]
+        emitByte(OP_EQUAL_PRESERVE);
+        // [base, equal]
+
+        previousCaseGuard = emitJump(OP_JUMP_IF_FALSE);
+
+        // Pop truth value inside case block
+        emitByte(OP_POP);
+
+        consume(TOKEN_COLON, "Expect ':' after case expression.");
+        while (!check(TOKEN_CASE) && !check(TOKEN_RIGHT_BRACE) && !check(TOKEN_EOF)) {
+            statement();
+        }
+
+        emitJump(OP_JUMP);
+    }
+
+    consume(TOKEN_RIGHT_BRACE, "Expect '}' to end switch cases.");
+
+    if (previousCaseGuard != -1) patchJump(previousCaseGuard);
+
+    // Always switch switched value
+    emitByte(OP_POP);
+
+    
+}
+
 static void synchronize() {
     parser.panicMode = false;
 
@@ -636,6 +684,8 @@ static void declaration() {
 static void statement() {
     if (match(TOKEN_PRINT)) {
         printStatement();
+    } else if (match(TOKEN_SWITCH)) {
+        switchStatement();
     } else if (match(TOKEN_FOR)) {
         forStatement();
     } else if (match(TOKEN_IF)) {

@@ -1,0 +1,4 @@
+switch (2) {
+case 1: print "uno";
+case 2: print "due";
+}
