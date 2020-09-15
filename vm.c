@@ -16,6 +16,21 @@ static Value clockNative(int argCount, Value* args) {
     return NUMBER_VAL((double)clock() / CLOCKS_PER_SEC);
 }
 
+static Value writeFile(int argCount, Value* args) {
+    ObjString *fileName = AS_STRING(args[0]);
+
+    char terminatedFileName[256];
+    memcpy(terminatedFileName, fileName->chars, sizeof(char) * fileName->length);
+    terminatedFileName[fileName->length] = 0;
+
+    FILE *file = fopen(terminatedFileName, "a");
+    ObjString *string = AS_STRING(args[1]);
+    fprintf(file, "%.*s", string->length, string->chars);
+    fclose(file);
+
+    return NIL_VAL;
+}
+
 static void resetStack() {
     vm.stackTop = vm.stack;
     vm.frameCount = 0;
@@ -62,6 +77,7 @@ void initVM() {
     initTable(&vm.strings);
 
     defineNative("clock", clockNative);
+    defineNative("writeFile", writeFile);
 }
 
 void freeVM() {
