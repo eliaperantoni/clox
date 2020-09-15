@@ -12,8 +12,8 @@
 
 VM vm;
 
-static Value clockNative(int argCount, Value* args) {
-    return NUMBER_VAL((double)clock() / CLOCKS_PER_SEC);
+static NativeResult clockNative(int argCount, Value* args) {
+    return (NativeResult){ .isOk = true, .res = NUMBER_VAL((double)clock() / CLOCKS_PER_SEC) };
 }
 
 static void resetStack() {
@@ -112,9 +112,17 @@ static bool callValue(Value callee, int argCount) {
 
             case OBJ_NATIVE: {
                 NativeFn native = AS_NATIVE(callee);
-                Value result = native(argCount, vm.stackTop - argCount);
-                vm.stackTop -= argCount + 1;
-                push(result);
+                NativeResult result = native(argCount, vm.stackTop - argCount);
+
+                if(result.isOk) {
+                    vm.stackTop -= argCount + 1;
+                    push(result.res);
+                } else {
+                    runtimeError("Error in native function");
+                    printValue(result.err);
+                    return false;
+                }
+
                 return true;
             }
 

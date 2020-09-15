@@ -34,7 +34,13 @@ typedef struct {
     ObjString* name;
 } ObjFunction;
 
-typedef Value (*NativeFn)(int argCount, Value* args);
+typedef struct {
+    Value res;
+    Value err;
+    bool isOk;
+} NativeResult;
+
+typedef NativeResult (*NativeFn)(int argCount, Value* args);
 
 typedef struct {
     Obj obj;
