@@ -21,7 +21,7 @@ static void resetStack() {
     vm.frameCount = 0;
 }
 
-static void runtimeError(const char* format, ...) {
+static void runtimeError(uint8_t *ip, const char* format, ...) {
     va_list args;
     va_start(args, format);
     vfprintf(stderr, format, args);
@@ -33,7 +33,7 @@ static void runtimeError(const char* format, ...) {
         ObjFunction* function = frame->function;
         // -1 because the IP is sitting on the next instruction to be
         // executed.
-        size_t instruction = frame->ip - function->chunk.code - 1;
+        size_t instruction = ip - function->chunk.code - 1;
         fprintf(stderr, "[line %d] in ",
                 function->chunk.lines[instruction]);
         if (function->name == NULL) {
@@ -84,15 +84,14 @@ static Value peek(int distance) {
     return vm.stackTop[-1 - distance];
 }
 
-static bool call(ObjFunction* function, int argCount) {
+static bool call(uint8_t *ip, ObjFunction* function, int argCount) {
     if (argCount != function->arity) {
-        runtimeError("Expected %d arguments but got %d.",
-                     function->arity, argCount);
+        runtimeError("Expected %d arguments but got %d.", function->arity, argCount);
         return false;
     }
 
     if (vm.frameCount == FRAMES_MAX) {
-        runtimeError("Stack overflow.");
+        runtimeError(ip, "Stack overflow.");
         return false;
     }
 
@@ -104,11 +103,11 @@ static bool call(ObjFunction* function, int argCount) {
     return true;
 }
 
-static bool callValue(Value callee, int argCount) {
+static bool callValue(uint8_t *ip, Value callee, int argCount) {
     if (IS_OBJ(callee)) {
         switch (OBJ_TYPE(callee)) {
             case OBJ_FUNCTION:
-                return call(AS_FUNCTION(callee), argCount);
+                return call(ip, AS_FUNCTION(callee), argCount);
 
             case OBJ_NATIVE: {
                 NativeFn native = AS_NATIVE(callee);
@@ -124,7 +123,7 @@ static bool callValue(Value callee, int argCount) {
         }
     }
 
-    runtimeError("Can only call functions and classes.");
+    runtimeError(ip, "Can only call functions and classes.");
     return false;
 }
 
@@ -149,9 +148,12 @@ static void concatenate() {
 static InterpretResult run() {
     CallFrame* frame = &vm.frames[vm.frameCount - 1];
 
-#define READ_BYTE() (*frame->ip++)
+    register uint8_t *ip = frame->ip;
+
+
+#define READ_BYTE() (ip++,*(ip-1))
 #define READ_SHORT() \
-    (frame->ip += 2, (uint16_t)((frame->ip[-2] << 8) | frame->ip[-1]))
+    (ip += 2, (uint16_t)((ip[-2] << 8) | ip[-1]))
 #define READ_CONSTANT() \
     (frame->function->chunk.constants.values[READ_BYTE()])
 #define READ_STRING() AS_STRING(READ_CONSTANT())
@@ -159,7 +161,7 @@ static InterpretResult run() {
 #define BINARY_OP(valueType, op) \
     do { \
       if (!IS_NUMBER(peek(0)) || !IS_NUMBER(peek(1))) { \
-        runtimeError("Operands must be numbers."); \
+        runtimeError(ip, "Operands must be numbers."); \
         return INTERPRET_RUNTIME_ERROR; \
       } \
       double b = AS_NUMBER(pop()); \
@@ -177,7 +179,7 @@ static InterpretResult run() {
         }
         printf("\n");
         disassembleInstruction(&frame->function->chunk,
-                               (int)(frame->ip - frame->function->chunk.code));
+                               (int)(ip - frame->function->chunk.code));
 #endif
 
         uint8_t instruction;
@@ -208,7 +210,7 @@ static InterpretResult run() {
                 ObjString* name = READ_STRING();
                 Value value;
                 if (!tableGet(&vm.globals, name, &value)) {
-                    runtimeError("Undefined variable '%s'.", name->chars);
+                    runtimeError(ip, "Undefined variable '%s'.", name->chars);
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 push(value);
@@ -226,7 +228,7 @@ static InterpretResult run() {
                 ObjString* name = READ_STRING();
                 if (tableSet(&vm.globals, name, peek(0))) {
                     tableDelete(&vm.globals, name);
-                    runtimeError("Undefined variable '%s'.", name->chars);
+                    runtimeError(ip, "Undefined variable '%s'.", name->chars);
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 break;
@@ -249,7 +251,7 @@ static InterpretResult run() {
                     double a = AS_NUMBER(pop());
                     push(NUMBER_VAL(a + b));
                 } else {
-                    runtimeError("Operands must be two numbers or two strings.");
+                    runtimeError(ip, "Operands must be two numbers or two strings.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
                 break;
@@ -262,7 +264,7 @@ static InterpretResult run() {
                 break;
             case OP_NEGATE:
                 if (!IS_NUMBER(peek(0))) {
-                    runtimeError("Operand must be a number.");
+                    runtimeError(ip, "Operand must be a number.");
                     return INTERPRET_RUNTIME_ERROR;
                 }
 
@@ -277,28 +279,32 @@ static InterpretResult run() {
 
             case OP_JUMP: {
                 uint16_t offset = READ_SHORT();
-                frame->ip += offset;
+                ip += offset;
                 break;
             }
 
             case OP_JUMP_IF_FALSE: {
                 uint16_t offset = READ_SHORT();
-                if (isFalsey(peek(0))) frame->ip += offset;
+                if (isFalsey(peek(0))) ip += offset;
                 break;
             }
 
             case OP_LOOP: {
                 uint16_t offset = READ_SHORT();
-                frame->ip -= offset;
+                ip -= offset;
                 break;
             }
 
             case OP_CALL: {
                 int argCount = READ_BYTE();
-                if (!callValue(peek(argCount), argCount)) {
+                if (!callValue(ip, peek(argCount), argCount)) {
                     return INTERPRET_RUNTIME_ERROR;
                 }
+
+                frame->ip = ip;
                 frame = &vm.frames[vm.frameCount - 1];
+                ip = frame->ip;
+
                 break;
             }
 
@@ -315,6 +321,8 @@ static InterpretResult run() {
                 push(result);
 
                 frame = &vm.frames[vm.frameCount - 1];
+                ip = frame->ip;
+
                 break;
             }
         }
@@ -332,7 +340,7 @@ InterpretResult interpret(const char* source) {
     if (function == NULL) return INTERPRET_COMPILE_ERROR;
 
     push(OBJ_VAL(function));
-    callValue(OBJ_VAL(function), 0);
+    callValue((uint8_t*) NULL, OBJ_VAL(function), 0);
 
     return run();
 }
