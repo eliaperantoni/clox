@@ -162,7 +162,7 @@ static void emitReturn() {
     emitByte(OP_RETURN);
 }
 
-// makeConstant adds the provided value to the chunk constants array and returns the index
+// Adds value to constant table and returns index
 static uint8_t makeConstant(Value value) {
     int constant = addConstant(currentChunk(), value);
     if (constant > UINT8_MAX) {
@@ -173,8 +173,7 @@ static uint8_t makeConstant(Value value) {
     return (uint8_t)constant;
 }
 
-// emitConstant adds the provided value to the chunk constants array and emits an OP_CONSTANT that will push the value
-// onto the stack at runtime
+// Emits bytes to push some constant value on the stack at runtime
 static void emitConstant(Value value) {
     emitBytes(OP_CONSTANT, makeConstant(value));
 }
@@ -252,7 +251,7 @@ static void declaration();
 static ParseRule* getRule(TokenType type);
 static void parsePrecedence(Precedence precedence);
 
-// makeConstant adds the provided identifier token to the chunk constants array and returns the index
+// Adds identifier to constant table and returns index
 static uint8_t identifierConstant(Token* name) {
     return makeConstant(OBJ_VAL(copyString(name->start, name->length)));
 }
@@ -262,6 +261,7 @@ static bool identifiersEqual(Token* a, Token* b) {
     return memcmp(a->start, b->start, a->length) == 0;
 }
 
+// Returns index of stack slot of local variable
 static int resolveLocal(Compiler* compiler, Token* name) {
     for (int i = compiler->localCount - 1; i >= 0; i--) {
         Local* local = &compiler->locals[i];
@@ -313,6 +313,7 @@ static int resolveUpvalue(Compiler* compiler, Token* name) {
     return -1;
 }
 
+// Allocates a stack slot for a local
 static void addLocal(Token name) {
     if (current->localCount == UINT8_COUNT) {
         error("Too many local variables in function.");
@@ -325,6 +326,7 @@ static void addLocal(Token name) {
     local->isCaptured = false;
 }
 
+// Allocates stack slot if context is local, else does nothing because globals are implicitly declared
 static void declareVariable() {
     // Global variables are implicitly declared.
     if (current->scopeDepth == 0) return;
@@ -344,7 +346,7 @@ static void declareVariable() {
     addLocal(*name);
 }
 
-// parseVariable consumes the current TOKEN_IDENTIFIER and adds it to the chunk constants array, returning the index
+// Consumes identifier for a variable and declares it. Returns index if variable is global.
 static uint8_t parseVariable(const char* errorMessage) {
     consume(TOKEN_IDENTIFIER, errorMessage);
 
@@ -354,14 +356,14 @@ static uint8_t parseVariable(const char* errorMessage) {
     return identifierConstant(&parser.previous);
 }
 
+// Marks last declared variable as initialized
 static void markInitialized() {
     if (current->scopeDepth == 0) return;
     current->locals[current->localCount - 1].depth =
             current->scopeDepth;
 }
 
-// defineVariable emits bytecode to define and initialize a global variable, given the index of the constant initializer
-// in the chunk constants array
+// Initializes last defined local or provided global with the value on top of the stack
 static void defineVariable(uint8_t global) {
     if (current->scopeDepth > 0) {
         markInitialized();
@@ -425,6 +427,18 @@ static void binary(bool canAssign) {
 static void call(bool canAssign) {
     uint8_t argCount = argumentList();
     emitBytes(OP_CALL, argCount);
+}
+
+static void dot(bool canAssign) {
+    consume(TOKEN_IDENTIFIER, "Expect property name after '.'.");
+    uint8_t name = identifierConstant(&parser.previous);
+
+    if (canAssign && match(TOKEN_EQUAL)) {
+        expression();
+        emitBytes(OP_SET_PROPERTY, name);
+    } else {
+        emitBytes(OP_GET_PROPERTY, name);
+    }
 }
 
 static void literal(bool canAssign) {
@@ -514,7 +528,7 @@ ParseRule rules[] = {
         [TOKEN_LEFT_BRACE]    = { NULL,     NULL,   PREC_NONE },
         [TOKEN_RIGHT_BRACE]   = { NULL,     NULL,   PREC_NONE },
         [TOKEN_COMMA]         = { NULL,     NULL,   PREC_NONE },
-        [TOKEN_DOT]           = { NULL,     NULL,   PREC_NONE },
+        [TOKEN_DOT]           = { NULL,     dot,    PREC_CALL },
         [TOKEN_MINUS]         = { unary,    binary, PREC_TERM },
         [TOKEN_PLUS]          = { NULL,     binary, PREC_TERM },
         [TOKEN_SEMICOLON]     = { NULL,     NULL,   PREC_NONE },
@@ -621,6 +635,18 @@ static void function(FunctionType type) {
         emitByte(compiler.upvalues[i].isLocal ? 1 : 0);
         emitByte(compiler.upvalues[i].index);
     }
+}
+
+static void classDeclaration() {
+    consume(TOKEN_IDENTIFIER, "Expect class name.");
+    uint8_t nameConstant = identifierConstant(&parser.previous);
+    declareVariable();
+
+    emitBytes(OP_CLASS, nameConstant);
+    defineVariable(nameConstant);
+
+    consume(TOKEN_LEFT_BRACE, "Expect '{' before class body.");
+    consume(TOKEN_RIGHT_BRACE, "Expect '}' after class body.");
 }
 
 static void funDeclaration() {
@@ -783,7 +809,9 @@ static void synchronize() {
 }
 
 static void declaration() {
-    if (match(TOKEN_FUN)) {
+    if (match(TOKEN_CLASS)) {
+        classDeclaration();
+    } else if (match(TOKEN_FUN)) {
         funDeclaration();
     } else if (match(TOKEN_VAR)) {
         varDeclaration();
